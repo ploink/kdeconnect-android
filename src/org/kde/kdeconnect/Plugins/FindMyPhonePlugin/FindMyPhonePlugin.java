@@ -2,7 +2,7 @@
  * SPDX-FileCopyrightText: 2015 David Edmundson <david@davidedmundson.co.uk>
  *
  * SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only OR LicenseRef-KDE-Accepted-GPL
-*/
+ */
 
 package org.kde.kdeconnect.Plugins.FindMyPhonePlugin;
 
@@ -11,15 +11,12 @@ import android.app.Activity;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.content.Intent;
-import android.content.SharedPreferences;
-import android.media.AudioAttributes;
+import android.media.Ringtone;
+import android.media.RingtoneManager;
 import android.media.AudioManager;
-import android.media.MediaPlayer;
 import android.net.Uri;
 import android.os.Build;
 import android.os.PowerManager;
-import android.preference.PreferenceManager;
-import android.provider.Settings;
 import android.util.Log;
 
 import androidx.annotation.NonNull;
@@ -36,8 +33,6 @@ import org.kde.kdeconnect.Plugins.PluginFactory;
 import org.kde.kdeconnect.UserInterface.PluginSettingsFragment;
 import org.kde.kdeconnect_tp.R;
 
-import java.io.IOException;
-
 @PluginFactory.LoadablePlugin
 public class FindMyPhonePlugin extends Plugin {
     public final static String PACKET_TYPE_FINDMYPHONE_REQUEST = "kdeconnect.findmyphone.request";
@@ -45,7 +40,7 @@ public class FindMyPhonePlugin extends Plugin {
     private NotificationManager notificationManager;
     private int notificationId;
     private AudioManager audioManager;
-    private MediaPlayer mediaPlayer;
+    private Ringtone ringtone;
     private int previousVolume = -1;
     private PowerManager powerManager;
 
@@ -73,44 +68,23 @@ public class FindMyPhonePlugin extends Plugin {
         notificationId = (int) System.currentTimeMillis();
         audioManager = ContextCompat.getSystemService(context, AudioManager.class);
         powerManager = ContextCompat.getSystemService(context, PowerManager.class);
-
-        SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(context);
-        Uri ringtone;
-        String ringtoneString = prefs.getString(context.getString(R.string.findmyphone_preference_key_ringtone), "");
-        if (ringtoneString.isEmpty()) {
-            ringtone = Settings.System.DEFAULT_RINGTONE_URI;
-        } else {
-            ringtone = Uri.parse(ringtoneString);
-        }
-
         try {
-            mediaPlayer = new MediaPlayer();
-            mediaPlayer.setDataSource(context, ringtone);
-            AudioAttributes audioAttributes = new AudioAttributes.Builder()
-                .setUsage(AudioAttributes.USAGE_ALARM)
-                .setContentType(AudioAttributes.CONTENT_TYPE_UNKNOWN)
-                .setFlags(AudioAttributes.FLAG_AUDIBILITY_ENFORCED)
-                .build();
-            mediaPlayer.setWakeMode(context, PowerManager.SCREEN_DIM_WAKE_LOCK); // Prevent screen turning off, requires WAKE_LOCK permission
-            mediaPlayer.setAudioAttributes(audioAttributes);
-            mediaPlayer.setLooping(true);
-            mediaPlayer.prepare();
+            Uri notification = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE);
+            ringtone = RingtoneManager.getRingtone(context, notification);
         } catch (Exception e) {
             Log.e("FindMyPhoneActivity", "Exception", e);
             return false;
         }
-
         return true;
     }
 
     @Override
     public void onDestroy() {
-        if (mediaPlayer.isPlaying()) {
+        if (ringtone.isPlaying()) {
             stopPlaying();
         }
+        ringtone = null;
         audioManager = null;
-        mediaPlayer.release();
-        mediaPlayer = null;
     }
 
     @Override
@@ -155,26 +129,19 @@ public class FindMyPhonePlugin extends Plugin {
 
     private void createNotification(PendingIntent pendingIntent) {
         NotificationCompat.Builder notification = new NotificationCompat.Builder(context, NotificationHelper.Channels.HIGHPRIORITY);
-        notification
-                .setSmallIcon(R.drawable.ic_notification)
-                .setOngoing(false)
-                .setFullScreenIntent(pendingIntent, true)
-                .setPriority(NotificationCompat.PRIORITY_HIGH)
-                .setAutoCancel(true)
-                .setOngoing(true)
-                .setContentTitle(context.getString(R.string.findmyphone_found));
+        notification.setSmallIcon(R.drawable.ic_notification).setOngoing(false).setFullScreenIntent(pendingIntent, true).setPriority(NotificationCompat.PRIORITY_HIGH).setAutoCancel(true).setOngoing(true).setContentTitle(context.getString(R.string.findmyphone_found));
         notification.setGroup("BackgroundService");
 
         notificationManager.notify(notificationId, notification.build());
     }
 
     void startPlaying() {
-        if (mediaPlayer != null && !mediaPlayer.isPlaying()) {
+        if (ringtone != null && !ringtone.isPlaying()) {
             // Make sure we are heard even when the phone is silent, restore original volume later
-            previousVolume = audioManager.getStreamVolume(AudioManager.STREAM_ALARM);
-            audioManager.setStreamVolume(AudioManager.STREAM_ALARM, audioManager.getStreamMaxVolume(AudioManager.STREAM_ALARM), 0);
+            previousVolume = audioManager.getStreamVolume(AudioManager.STREAM_RING);
+            audioManager.setStreamVolume(AudioManager.STREAM_RING, audioManager.getStreamMaxVolume(AudioManager.STREAM_RING), 0);
 
-            mediaPlayer.start();
+            ringtone.play();
         }
     }
 
@@ -189,18 +156,9 @@ public class FindMyPhonePlugin extends Plugin {
         }
 
         if (previousVolume != -1) {
-            audioManager.setStreamVolume(AudioManager.STREAM_ALARM, previousVolume, 0);
+            audioManager.setStreamVolume(AudioManager.STREAM_RING, previousVolume, 0);
         }
-        mediaPlayer.stop();
-        try {
-            mediaPlayer.prepare();
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-    }
-
-    boolean isPlaying() {
-        return mediaPlayer.isPlaying();
+        ringtone.stop();
     }
 
     @Override
